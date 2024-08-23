@@ -18,9 +18,9 @@
 using namespace std;
 
 struct StationData{
-    float min = std::numeric_limits<float>::max();
-    float max = std::numeric_limits<float>::min();
-    float sum = 0.0f;
+    int min = std::numeric_limits<int>::max();
+    int max = std::numeric_limits<int>::min();
+    int sum = 0;
     uint count = 0;
     
     StationData& operator +=(const StationData& other){
@@ -31,7 +31,7 @@ struct StationData{
         return *this;
     }
     
-    StationData& operator +=(const float value){
+    StationData& operator +=(const int value){
         min = std::min(min,value);
         max = std::max(max,value);
         sum += value;
@@ -42,13 +42,26 @@ struct StationData{
 
 struct LineContent{
     std::string name;
-    float value;
+    int value;
     
     LineContent(const string_view& line){
         const auto separator = line.find_first_of(';');
         name = line.substr(0,separator);
-        value = std::stof(string(line.substr(separator+1)));
+        value = extractValue(line.substr(separator+1));
     }
+    
+    int extractValue(const string_view& strValue){
+        int numberIndex = strValue[0] == '-' ? 1 : 0;
+        if(strValue[numberIndex+1]=='.'){
+            int value = (strValue[numberIndex]-'0')*10+strValue[numberIndex+2]-'0';
+            return strValue[0] == '-' ? -value : value;
+        }else{
+            int value = (strValue[numberIndex]-'0')*100+(strValue[numberIndex+1]-'0')*10+strValue[numberIndex+3]-'0';
+            return strValue[0] == '-' ? -value : value;
+        }
+        
+    }
+    
 };
 
 
@@ -63,16 +76,19 @@ int main(int argc, const char * argv[]) {
         LineContent lineContent((string_view(lineBuffer.data())));
         results[lineContent.name]+=lineContent.value;
     }
-
+    
+    auto endCompute = std::chrono::steady_clock::now();
     for (auto const& [key, val] : results){
-        cout <<format("{}={}/{:.1f}/{},",key,val.min,val.sum/val.count,val.max);
+        cout <<format("{}={}/{:.1f}/{},",key,val.min/10.0f,(val.sum/val.count)/10.0f,val.max/10.0f);
     }
     
     // Close the file
     mesurement.close();
     
     auto end = std::chrono::steady_clock::now();
-    std::cout<<std::endl <<std::endl << std::chrono::duration<double, std::milli>(end-start).count() << " ms" << std::endl;
+    std::cout<<std::endl <<std::endl <<"Compute time:" << std::chrono::duration<double, std::milli>(endCompute-start).count() << " ms" << std::endl;
+    std::cout << "Print Time:"<<std::chrono::duration<double, std::milli>(end-endCompute).count() << " ms" << std::endl;
+    std::cout<< "Total Time:" << std::chrono::duration<double, std::milli>(end-start).count() << " ms" << std::endl;
 
     
     return 0;
