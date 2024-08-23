@@ -13,6 +13,8 @@
 #include <array>
 #include <map>
 #include <format>
+#include <thread>
+#include <ranges>
 #include <chrono>
 
 using namespace std;
@@ -104,32 +106,90 @@ string_view consumeLine(const string_view& buffer){
     return buffer.substr(termi+1);
 }
 
-int main(int argc, const char * argv[]) {
-    auto start = std::chrono::steady_clock::now();
-    
-    MmappedFile file("measurements.txt");
-    const string_view allFile(file.mapped,file.size);
+std::vector<string_view> splitWork(const string_view& fullDataSet,uint chunkNumber){
+    const auto chunkSize = fullDataSet.size()/chunkNumber;
+    vector<string_view> splitString;
+    splitString.reserve(chunkNumber);
+    string_view::size_type currentChunkStart = 0;
+    string_view::size_type currentChunkEnd = chunkSize;
+    for (int i = 0; i < chunkNumber; i++) {
+        if(currentChunkEnd != fullDataSet.size()){
+            currentChunkEnd += fullDataSet.find_first_of('\n',currentChunkEnd)-currentChunkEnd+1;
+        }
+        splitString.push_back(fullDataSet.substr(currentChunkStart,currentChunkEnd-currentChunkStart));
+        currentChunkStart = currentChunkEnd;
+        currentChunkEnd = std::min(currentChunkStart+chunkSize,fullDataSet.size());
+    }
+    return splitString;
+}
 
-    std::unordered_map<std::string_view, StationData> results;
-    string_view currentLine = allFile;
+void thread_work(const string_view& input,std::unordered_map<std::string_view, StationData> &results){
+    string_view currentLine = input;
 
     while (currentLine.size()>0) {
         LineContent lineContent(currentLine);
         results[lineContent.name]+=lineContent.value;
         currentLine = consumeLine(currentLine);
     }
+}
+
+
+void format_output(std::ostream &out,
+                   const std::unordered_map<std::string_view, StationData>& db) {
+    std::vector<std::string_view> names(db.size());
+    // Grab all the unique station names
+    std::ranges::copy(db | std::views::keys, names.begin());
+    // Sorting UTF-8 strings lexicographically is the same
+    // as sorting by codepoint value
+    std::ranges::sort(names, std::less<>{});
+
+    std::string delim = "";
+
+    out << "{";
+    for (const auto &name : names) {
+        const auto &val = db.find(name)->second;
+        out <<format("{}={}/{:.1f}/{}, ",name,val.min/10.0f,(val.sum/val.count)/10.0f,val.max/10.0f);
+    }
+    out << "}\n";
+}
+
+int main(int argc, const char * argv[]) {
+    auto start = std::chrono::steady_clock::now();
     
+    MmappedFile file("measurements.txt");
+    const string_view allFile(file.mapped,file.size);
+      
+    const auto nThread = std::thread::hardware_concurrency();
+    
+    const auto splittedString = splitWork(allFile, nThread);
+    std::vector<std::unordered_map<std::string_view, StationData>> resultData(nThread);
+    std::vector<thread> workingThread;
+    std::unordered_map<std::string_view, StationData> totalResult;
+    
+    for ( auto i = 0 ; i<nThread ; i++){
+        workingThread.emplace_back(thread_work,std::ref(splittedString[i]),std::ref(resultData[i]));
+    }
+    for ( auto& t : workingThread){
+        t.join();
+    }
     auto endCompute = std::chrono::steady_clock::now();
-    for (auto const& [key, val] : results){
-        cout <<format("{}={}/{:.1f}/{},",key,val.min/10.0f,(val.sum/val.count)/10.0f,val.max/10.0f);
+    
+    
+    for (const auto & workResult : resultData){
+        for (auto const& [key, val] : workResult){
+            totalResult[key]+=val;
+        }
     }
     
-    cout<<results.size();
-    
-
+    auto endMerge = std::chrono::steady_clock::now();
+ 
+    format_output(std::cout, totalResult);
+ 
     auto end = std::chrono::steady_clock::now();
-    std::cout<<std::endl <<std::endl <<"Compute time:" << std::chrono::duration<double, std::milli>(endCompute-start).count() << " ms" << std::endl;
-    std::cout << "Print Time:"<<std::chrono::duration<double, std::milli>(end-endCompute).count() << " ms" << std::endl;
+    
+    std::cout<<std::endl <<std::endl <<"Compute time:" << std::chrono::duration<double>(endCompute-start).count() << " s" << std::endl;
+    std::cout<<std::endl <<std::endl <<"Merge time:" << std::chrono::duration<double,std::milli>(endMerge-endCompute).count() << " s" << std::endl;
+    std::cout << "Print Time:"<<std::chrono::duration<double, std::milli>(end-endMerge).count() << " ms" << std::endl;
     std::cout<< "Total Time:" << std::chrono::duration<double, std::milli>(end-start).count() << " ms" << std::endl;
 
     
