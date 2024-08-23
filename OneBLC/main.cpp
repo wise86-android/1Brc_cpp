@@ -64,17 +64,59 @@ struct LineContent{
     
 };
 
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
+
+class MmappedFile{
+    int fd;
+        
+public:
+    char *mapped;
+    off_t size ;
+    
+    MmappedFile(const string_view& fileName){
+        fd = open(fileName.data(),O_RDONLY);
+        struct stat s;
+        fstat (fd, & s);
+        size = s.st_size;
+
+        /* Memory-map the file. */
+        mapped = (char*) mmap (0, size, PROT_READ, MAP_PRIVATE, fd, 0);
+        
+    }
+    inline char operator[](size_t offset){
+        return mapped[offset];
+    }
+    
+    ~MmappedFile(){
+        munmap(mapped,size);
+        close(fd);
+    }
+};
+
+string_view consumeLine(string_view& buffer){
+    const auto termi = buffer.find_first_of('\n');
+    return buffer.substr(termi+1);
+}
 
 int main(int argc, const char * argv[]) {
     auto start = std::chrono::steady_clock::now();
+    
+    MmappedFile file("measurements.txt");
+    const string_view allFile(file.mapped,file.size);
 
-    ifstream mesurement("measurements.txt");
-    array<char,256> lineBuffer{};
     std::map<std::string, StationData> results;
-
-    while (mesurement.getline(lineBuffer.data(), lineBuffer.size())) {
-        LineContent lineContent((string_view(lineBuffer.data())));
+    string_view currentLine = allFile;
+    auto line = 0;
+    while (currentLine.size()>0) {
+        LineContent lineContent(currentLine);
         results[lineContent.name]+=lineContent.value;
+        currentLine = consumeLine(currentLine);
     }
     
     auto endCompute = std::chrono::steady_clock::now();
@@ -82,9 +124,7 @@ int main(int argc, const char * argv[]) {
         cout <<format("{}={}/{:.1f}/{},",key,val.min/10.0f,(val.sum/val.count)/10.0f,val.max/10.0f);
     }
     
-    // Close the file
-    mesurement.close();
-    
+
     auto end = std::chrono::steady_clock::now();
     std::cout<<std::endl <<std::endl <<"Compute time:" << std::chrono::duration<double, std::milli>(endCompute-start).count() << " ms" << std::endl;
     std::cout << "Print Time:"<<std::chrono::duration<double, std::milli>(end-endCompute).count() << " ms" << std::endl;
