@@ -16,6 +16,13 @@
 #include <thread>
 #include <ranges>
 #include <chrono>
+#include <stdio.h>
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <sys/mman.h>
 
 using namespace std;
 
@@ -65,14 +72,6 @@ struct LineContent{
     }
     
 };
-
-#include <stdio.h>
-#include <stdlib.h>
-#include <sys/types.h>
-#include <sys/stat.h>
-#include <unistd.h>
-#include <fcntl.h>
-#include <sys/mman.h>
 
 class MmappedFile{
     int fd;
@@ -133,20 +132,20 @@ void thread_work(const string_view& input,std::unordered_map<std::string_view, S
     }
 }
 
+#include <queue>
 
 void format_output(std::ostream &out,
                    const std::unordered_map<std::string_view, StationData>& db) {
-    std::vector<std::string_view> names(db.size());
+    std::priority_queue<std::string_view> names;
     // Grab all the unique station names
-    std::ranges::copy(db | std::views::keys, names.begin());
+    std::ranges::for_each(db | std::views::keys, [&names](const auto &key){names.push(key);});
     // Sorting UTF-8 strings lexicographically is the same
     // as sorting by codepoint value
-    std::ranges::sort(names, std::less<>{});
-
-    std::string delim = "";
+    //std::ranges::sort(names, std::less<>{});
 
     out << "{";
-    for (const auto &name : names) {
+    for (; !names.empty(); names.pop()){
+        const auto &name = names.top();
         const auto &val = db.find(name)->second;
         out <<format("{}={}/{:.1f}/{}, ",name,val.min/10.0f,(val.sum/val.count)/10.0f,val.max/10.0f);
     }
