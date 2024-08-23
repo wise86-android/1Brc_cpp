@@ -41,7 +41,7 @@ struct StationData{
 };
 
 struct LineContent{
-    std::string name;
+    string_view name;
     int value;
     
     LineContent(const string_view& line){
@@ -99,7 +99,7 @@ public:
     }
 };
 
-string_view consumeLine(string_view& buffer){
+string_view consumeLine(const string_view& buffer){
     const auto termi = buffer.find_first_of('\n');
     return buffer.substr(termi+1);
 }
@@ -110,9 +110,9 @@ int main(int argc, const char * argv[]) {
     MmappedFile file("measurements.txt");
     const string_view allFile(file.mapped,file.size);
 
-    std::map<std::string, StationData> results;
+    std::unordered_map<std::string_view, StationData> results;
     string_view currentLine = allFile;
-    auto line = 0;
+
     while (currentLine.size()>0) {
         LineContent lineContent(currentLine);
         results[lineContent.name]+=lineContent.value;
@@ -123,6 +123,8 @@ int main(int argc, const char * argv[]) {
     for (auto const& [key, val] : results){
         cout <<format("{}={}/{:.1f}/{},",key,val.min/10.0f,(val.sum/val.count)/10.0f,val.max/10.0f);
     }
+    
+    cout<<results.size();
     
 
     auto end = std::chrono::steady_clock::now();
